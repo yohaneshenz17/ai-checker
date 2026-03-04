@@ -6,6 +6,7 @@ import datetime
 from pathlib import Path
 from flask import Flask, request, render_template, jsonify, send_file, session, redirect, url_for
 from openai import OpenAI
+from statistics import median
 import mysql.connector
 import PyPDF2
 import docx
@@ -132,10 +133,12 @@ def chunk_paragraphs(paragraphs, max_chars=12000):
 
 # ================= RISK CATEGORY =================
 def kategori_risiko(skor):
-    if skor >= 75:
+    # Threshold baru, lebih konservatif untuk menekan false positive
+    # 0-39: low, 40-69: uncertain, >=70: high
+    if skor >= 70:
         return "high"
-    elif skor >= 50:
-        return "moderate"
+    elif skor >= 40:
+        return "uncertain"
     else:
         return "low"
 
@@ -269,7 +272,7 @@ def cek_ai():
         if not chunks:
             raise ValueError("Dokumen tidak memiliki paragraf valid untuk dianalisis")
 
-        total_score = 0
+        chunk_scores = []
         highlight_map = {}
         offset = 0  # FIX indexing
 
@@ -284,19 +287,31 @@ def cek_ai():
                     {
                         "role": "system",
                         "content": """
-Analisis probabilistik teks akademik.
-Kembalikan JSON:
+Anda adalah evaluator risiko AI-writing untuk teks akademik.
+Tujuan: MINIMALKAN false positive (jangan menuduh tulisan manusia sebagai AI tanpa bukti kuat).
 
+Aturan penilaian:
+1) Asumsikan teks human-written sebagai default.
+2) Skor tinggi hanya jika ada pola AI yang kuat, konsisten, dan berulang di banyak kalimat/paragraf.
+3) Bahasa rapi, baku, atau struktur akademik TIDAK cukup untuk menaikkan skor.
+4) Jika bukti lemah/ambigu, berikan skor rendah-menengah.
+5) Jika teks berisi detail lokal/spesifik, inkonsistensi manusiawi, atau variasi gaya alami, turunkan skor.
+6) Gunakan rentang skor konservatif:
+   - 0-39: kemungkinan besar human
+   - 40-69: uncertain/perlu review manual
+   - 70-100: indikasi kuat pola AI
+
+Kembalikan JSON valid berikut:
 {
- "chunk_score": 0-100,
- "paragraf_high_risk": [
-   {
-     "paragraf_index": number,
-     "skor": number,
-     "kalimat_index": [numbers],
-     "alasan": "..."
-   }
- ]
+  "chunk_score": 0-100,
+  "paragraf_high_risk": [
+    {
+      "paragraf_index": number,
+      "skor": number,
+      "kalimat_index": [numbers],
+      "alasan": "alasan singkat berbasis bukti linguistik"
+    }
+  ]
 }
 """
                     },
@@ -305,8 +320,8 @@ Kembalikan JSON:
             )
 
             data = json.loads(response.choices[0].message.content)
-            chunk_score = float(data.get("chunk_score", 0))
-            total_score += max(0, min(100, chunk_score))
+                chunk_score = float(data.get("chunk_score", 0))
+                chunk_scores.append(max(0, min(100, chunk_score)))
 
             for item in data.get("paragraf_high_risk", []):
                 local_index = int(item.get("paragraf_index", -1))
@@ -325,7 +340,7 @@ Kembalikan JSON:
 
             offset += len(chunk)
 
-        skor_total = round(total_score / len(chunks), 2)
+        skor_total = round(median(chunk_scores), 2)
         human_prob = round(100 - skor_total, 2)
 
         # ===== Statistik =====
@@ -338,15 +353,15 @@ Kembalikan JSON:
 
             if kategori == "high":
                 high += 1
-            elif kategori == "moderate":
-                moderate += 1
+            elif kategori == "uncertain":
+                uncertain += 1
             else:
                 low += 1
 
         stats = {
             "total": total_paragraf,
             "high": high,
-            "moderate": moderate,
+            "uncertain": uncertain,
             "low": low
         }
 
