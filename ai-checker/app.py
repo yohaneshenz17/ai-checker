@@ -3,6 +3,7 @@ import io
 import re
 import json
 import datetime
+from pathlib import Path
 from flask import Flask, request, render_template, jsonify, send_file, session, redirect, url_for
 from openai import OpenAI
 import mysql.connector
@@ -25,20 +26,22 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ================= AUTO CLEANUP REPORTS (1x per hari) =================
 
-CLEANUP_TRACK_FILE = "/home/stkp7133/ai-checker/last_cleanup.txt"
+BASE_DIR = Path(__file__).resolve().parent
+REPORTS_DIR = BASE_DIR / "laporan"
+CLEANUP_TRACK_FILE = BASE_DIR / "last_cleanup.txt"
 
 def cleanup_old_reports():
-    folder = "/home/stkp7133/ai-checker/laporan"
+    folder = REPORTS_DIR
 
-    if not os.path.exists(folder):
+    if not folder.exists():
         return
 
     today = datetime.date.today()
 
     # Cek apakah sudah cleanup hari ini
-    if os.path.exists(CLEANUP_TRACK_FILE):
+    if CLEANUP_TRACK_FILE.exists():
         try:
-            with open(CLEANUP_TRACK_FILE, "r") as f:
+            with CLEANUP_TRACK_FILE.open("r") as f:
                 last_cleanup_date = f.read().strip()
                 if last_cleanup_date == str(today):
                     return  # Sudah cleanup hari ini
@@ -49,21 +52,21 @@ def cleanup_old_reports():
     expire_days = 30
 
     for filename in os.listdir(folder):
-        filepath = os.path.join(folder, filename)
+        filepath = folder / filename
 
-        if os.path.isfile(filepath):
+        if filepath.is_file():
             try:
-                file_modified_time = datetime.datetime.fromtimestamp(os.path.getmtime(filepath))
+                file_modified_time = datetime.datetime.fromtimestamp(filepath.stat().st_mtime)
                 age_days = (now - file_modified_time).days
 
                 if age_days > expire_days:
-                    os.remove(filepath)
+                    filepath.unlink()
             except Exception as e:
                 print("Gagal hapus file:", filepath, e)
 
     # Simpan tanggal cleanup terakhir
     try:
-        with open(CLEANUP_TRACK_FILE, "w") as f:
+        with CLEANUP_TRACK_FILE.open("w") as f:
             f.write(str(today))
     except:
         pass
@@ -83,9 +86,15 @@ db_config = {
 
 # ================= TEXT EXTRACTION =================
 def ekstrak_teks(file):
+    if not file or not file.filename:
+        raise ValueError("File proposal wajib diunggah")
+
     teks = ""
     filename = file.filename.lower()
     file_stream = file.read()
+
+    if not file_stream:
+        raise ValueError("File proposal kosong")
 
     if filename.endswith(".pdf"):
         pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_stream))
@@ -97,6 +106,8 @@ def ekstrak_teks(file):
         doc = docx.Document(io.BytesIO(file_stream))
         for para in doc.paragraphs:
             teks += para.text + "\n"
+    else:
+        raise ValueError("Format file tidak didukung. Gunakan PDF atau DOCX")
 
     return teks.strip()
 
@@ -136,12 +147,12 @@ from reportlab.lib.units import inch
 from reportlab.lib.pagesizes import A4
 
 def generate_pdf(nama_mahasiswa, skor_total, stats, highlight_map, paragraphs):
-    folder = "laporan"
-    os.makedirs(folder, exist_ok=True)
+    REPORTS_DIR.mkdir(exist_ok=True)
 
-    filename = f"{folder}/laporan_{nama_mahasiswa.replace(' ','_')}_{int(datetime.datetime.now().timestamp())}.pdf"
+    safe_nama = re.sub(r"[^A-Za-z0-9_-]+", "_", (nama_mahasiswa or "mahasiswa").strip())
+    filename = REPORTS_DIR / f"laporan_{safe_nama}_{int(datetime.datetime.now().timestamp())}.pdf"
 
-    doc = SimpleDocTemplate(filename, pagesize=A4)
+    doc = SimpleDocTemplate(str(filename), pagesize=A4)
     elements = []
     styles = getSampleStyleSheet()
 
@@ -216,7 +227,7 @@ def generate_pdf(nama_mahasiswa, skor_total, stats, highlight_map, paragraphs):
     ))
 
     doc.build(elements)
-    return filename
+    return filename.name
 
 # ================= ROUTES =================
 @app.route("/login", methods=["GET", "POST"])
@@ -251,7 +262,12 @@ def cek_ai():
 
         teks = ekstrak_teks(file)
         paragraphs = [p.strip() for p in teks.split("\n") if p.strip()]
+        if not teks:
+            raise ValueError("Dokumen tidak mengandung teks yang dapat dianalisis")
+
         chunks = chunk_paragraphs(paragraphs)
+        if not chunks:
+            raise ValueError("Dokumen tidak memiliki paragraf valid untuk dianalisis")
 
         total_score = 0
         highlight_map = {}
@@ -261,7 +277,7 @@ def cek_ai():
             chunk_text = "\n".join(chunk)
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 temperature=0,
                 response_format={"type": "json_object"},
                 messages=[
@@ -289,10 +305,22 @@ Kembalikan JSON:
             )
 
             data = json.loads(response.choices[0].message.content)
-            total_score += data["chunk_score"]
+            chunk_score = float(data.get("chunk_score", 0))
+            total_score += max(0, min(100, chunk_score))
 
             for item in data.get("paragraf_high_risk", []):
-                global_index = offset + item["paragraf_index"]
+                local_index = int(item.get("paragraf_index", -1))
+                if local_index < 0 or local_index >= len(chunk):
+                    continue
+
+                global_index = offset + local_index
+                if global_index < 0 or global_index >= len(paragraphs):
+                    continue
+
+                if "kalimat_index" not in item or not isinstance(item["kalimat_index"], list):
+                    item["kalimat_index"] = []
+
+                item["skor"] = max(0, min(100, int(item.get("skor", 0))))
                 highlight_map[global_index] = item
 
             offset += len(chunk)
@@ -341,7 +369,7 @@ Kembalikan JSON:
             skor_total,
             json.dumps(highlight_map),
             file.filename,
-            pdf_file,
+            str(REPORTS_DIR / pdf_file),
             request.remote_addr,
             request.headers.get("User-Agent")
         ))
@@ -365,6 +393,15 @@ Kembalikan JSON:
 
 @app.route("/download/<path:filename>")
 def download_file(filename):
-    return send_file(filename, as_attachment=True)
+    if not session.get("authenticated"):
+        return redirect(url_for("login"))
+
+    safe_path = (REPORTS_DIR / filename).resolve()
+    if REPORTS_DIR.resolve() not in safe_path.parents:
+        return jsonify({"status": "error", "pesan": "File tidak valid"}), 400
+    if not safe_path.exists() or not safe_path.is_file():
+        return jsonify({"status": "error", "pesan": "File tidak ditemukan"}), 404
+
+    return send_file(safe_path, as_attachment=True)
 
 application = app
