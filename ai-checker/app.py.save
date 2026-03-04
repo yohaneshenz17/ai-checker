@@ -1,0 +1,92 @@
+from flask import Flask, request, render_template, jsonify
+from openai import OpenAI
+import mysql.connector
+import PyPDF2
+import docx
+import io
+
+app = Flask(__name__)
+
+# Menggunakan API Key yang Bapak berikan
+client = 
+OpenAI(api_key="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")
+
+# ==========================================
+# KONFIGURASI DATABASE CPANEL (SUDAH DISESUAIKAN)
+# ==========================================
+db_config = {
+    'host': 'localhost',
+    'user': 'stkp7133_stkyakob_aiadmin',
+    'password': '@stkmerauke01',
+    'database': 'stkp7133_stkyakob_aichecker'
+}
+
+def simpan_ke_db(nama_penguji, nama_mahasiswa, skor):
+    try:
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        sql = "INSERT INTO ai_checks (nama_penguji, nama_mahasiswa, skor_ai) VALUES (%s, %s, %s)"
+        val = (nama_penguji, nama_mahasiswa, float(skor.replace('%', '')))
+        cursor.execute(sql, val)
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print("Error DB:", e)
+
+def ekstrak_teks(file):
+    teks = ""
+    filename = file.filename.lower()
+    file_stream = file.read()
+    
+    if filename.endswith('.pdf'):
+        pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_stream))
+        for page in pdf_reader.pages:
+            teks += page.extract_text() + "\n"
+    elif filename.endswith('.docx'):
+        doc = docx.Document(io.BytesIO(file_stream))
+        for para in doc.paragraphs:
+            teks += para.text + "\n"
+    return teks
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/cek-ai', methods=['POST'])
+def cek_ai():
+    nama_penguji = request.form.get('nama_penguji')
+    nama_mahasiswa = request.form.get('nama_mahasiswa')
+    file = request.files.get('file_proposal')
+    
+    if not file or not nama_penguji or not nama_mahasiswa:
+        return jsonify({"status": "error", "pesan": "Semua form dan file wajib diisi!"})
+        
+    teks_proposal = ekstrak_teks(file)
+    
+    if len(teks_proposal) < 50:
+        return jsonify({"status": "error", "pesan": "Teks dalam file terlalu sedikit atau tidak terbaca."})
+
+    try:
+        # Menggunakan model gpt-4o-mini yang super murah dan cerdas
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Anda adalah pendeteksi AI. Analisis teks ini dan tentukan persentase seberapa besar teks ini dihasilkan oleh AI (seperti ChatGPT). Berikan HANYA angka persentasenya dan tanda persen, contoh: 25%."},
+                {"role": "user", "content": teks_proposal[:15000]} # Membatasi karakter agar aman dari limit token
+            ]
+        )
+        
+        skor_ai = response.choices[0].message.content.strip()
+        simpan_ke_db(nama_penguji, nama_mahasiswa, skor_ai)
+        
+        return jsonify({"status": "sukses", "skor": skor_ai})
+        
+    except Exception as e:
+        return jsonify({"status": "error", "pesan": str(e)})
+
+# Ini diperlukan agar dikenali oleh Phusion Passenger cPanel
+application = app
+
+if __name__ == '__main__':
+    app.run()

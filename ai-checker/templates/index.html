@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Probability Analysis – STK</title>
+
+<style>
+/* ================= BACKGROUND ================= */
+body{
+    font-family:'Segoe UI',Arial,sans-serif;
+    background: linear-gradient(135deg,#0f2027,#203a43,#2c5364);
+    margin:0;
+    padding:40px 0;
+}
+
+/* ================= CONTAINER ================= */
+.container{
+    width:90%;
+    max-width:1100px;
+    margin:auto;
+    background:#ffffff;
+    padding:50px 60px;
+    border-radius:20px;
+    box-shadow:0 30px 80px rgba(0,0,0,0.25);
+}
+
+.form-section{
+    margin-bottom:40px;
+}
+
+.result-section{
+    margin-top:50px;
+    border-top:1px solid #e9ecef;
+    padding-top:40px;
+}
+
+@keyframes fadeIn{
+    from{opacity:0; transform:translateY(20px);}
+    to{opacity:1; transform:translateY(0);}
+}
+
+/* ================= HEADER ================= */
+.header{
+    text-align:center;
+    margin-bottom:30px;
+}
+
+.header img{
+    height:80px;
+    margin-bottom:20px;
+}
+
+.header h1{
+    margin:0;
+    font-size:28px;
+    font-weight:700;
+    color:#0f3057;
+    letter-spacing:0.5px;
+}
+
+.header p{
+    margin-top:12px;
+    color:#6c757d;
+    font-size:16px;
+}
+
+/* ================= FORM ================= */
+input{
+    width:100%;
+    padding:16px;
+    margin-top:12px;
+    border-radius:14px;
+    border:1px solid #e0e6ed;
+    font-size:15px;
+    transition:0.3s;
+}
+
+input:focus{
+    outline:none;
+    border-color:#1f6feb;
+    box-shadow:0 0 0 4px rgba(31,111,235,0.15);
+}
+
+/* ================= BUTTON ================= */
+button{
+    width:100%;
+    padding:18px;
+    margin-top:18px;
+    border-radius:14px;
+    border:none;
+    background:linear-gradient(135deg,#1f6feb,#174ea6);
+    color:white;
+    font-size:17px;
+    font-weight:600;
+    cursor:pointer;
+    transition:0.3s;
+}
+
+button:hover{
+    transform:translateY(-3px);
+    box-shadow:0 15px 30px rgba(31,111,235,0.35);
+}
+
+/* ================= RESULT ================= */
+.result-box{
+    margin-top:40px;
+    display:none;
+}
+
+/* ================= PROGRESS ================= */
+.progress-bar{
+    width:100%;
+    height:26px;
+    background:#e9ecef;
+    border-radius:14px;
+    overflow:hidden;
+    margin:25px 0;
+}
+
+.progress-fill{
+    height:100%;
+    transition:width 0.6s ease;
+}
+
+/* ================= PARAGRAPH ================= */
+.paragraph{
+    margin-top:28px;
+    padding:22px;
+    border-radius:14px;
+    line-height:1.75;
+    font-size:15px;
+    background:#f8f9fb;
+}
+
+.paragraph:hover{
+    transform:translateY(-4px);
+    box-shadow:0 15px 35px rgba(0,0,0,0.08);
+}
+
+.high-risk{
+    background:#fff4f4;
+    border-left:8px solid #dc3545;
+}
+
+.moderate-risk{
+    background:#fffbea;
+    border-left:8px solid #ffc107;
+}
+
+.low-risk{
+    background:#f3f8ff;
+    border-left:8px solid #28a745;
+}
+
+/* ================= SENTENCE HIGHLIGHT ================= */
+.sentence-highlight-high{
+    background:#ffcccc;
+    padding:4px 8px;
+    border-radius:8px;
+}
+
+.sentence-highlight-moderate{
+    background:#fff3b0;
+    padding:4px 8px;
+    border-radius:8px;
+}
+
+/* ================= STATS & GUIDE ================= */
+.stats-box{
+    margin-top:30px;
+    padding:30px;
+    background:#f4f6f9;
+    border-radius:18px;
+    box-shadow:0 10px 25px rgba(0,0,0,0.05);
+}
+
+.guide{
+    margin-top:40px;
+    padding:30px;
+    background:#eef2f7;
+    border-radius:18px;
+    box-shadow:0 10px 25px rgba(0,0,0,0.05);
+}
+
+/* ================= FOOTER ================= */
+.footer{
+    margin-top:60px;
+    text-align:center;
+    font-size:14px;
+    color:#adb5bd;
+}
+
+.footer img{
+    height:24px;
+    vertical-align:middle;
+    margin-left:8px;
+}
+
+/* ================= LOADING ================= */
+#loadingOverlay{
+display:none;
+position:fixed;
+top:0;left:0;width:100%;height:100%;
+background:rgba(0,0,0,0.75);
+z-index:9999;
+justify-content:center;
+align-items:center;
+flex-direction:column;
+color:white;
+font-size:22px;
+}
+
+.spinner{
+border:7px solid rgba(255,255,255,0.2);
+border-top:7px solid white;
+border-radius:50%;
+width:65px;height:65px;
+animation:spin 1s linear infinite;
+margin-bottom:25px;
+}
+
+@keyframes spin{
+0%{transform:rotate(0deg);}
+100%{transform:rotate(360deg);}
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="header">
+    <img src="{{ url_for('static', filename='logo.png') }}">
+    <h1>AI Probability Analysis System</h1>
+    <p>Sistem Screening Probabilistik untuk Diskusi Akademik</p>
+</div>
+
+<div class="form-section">
+<form id="aiForm">
+    <input type="text" id="nama_penguji" placeholder="Nama Penguji" required>
+    <input type="text" id="nama_mahasiswa" placeholder="Nama Mahasiswa" required>
+    <input type="file" id="file_proposal" accept=".pdf,.docx" required>
+    <button type="submit">Analisis Dokumen</button>
+</form>
+</div>
+
+<div class="result-section">
+<div id="hasil" class="result-box"></div>
+</div>
+
+<div class="footer">
+Hasil analisis bersifat probabilistik dan bukan bukti definitif penggunaan AI.<br>
+Teknologi analisis berbasis model bahasa dari 
+<img src="{{ url_for('static', filename='openai.png') }}">
+</div>
+
+</div>
+
+<div id="loadingOverlay">
+<div class="spinner"></div>
+Menganalisis seluruh dokumen... Mohon tunggu.
+</div>
+
+<script>
+document.getElementById('aiForm').addEventListener('submit', async function(e){
+e.preventDefault();
+document.getElementById("loadingOverlay").style.display="flex";
+
+const formData=new FormData();
+formData.append('nama_penguji',document.getElementById('nama_penguji').value);
+formData.append('nama_mahasiswa',document.getElementById('nama_mahasiswa').value);
+formData.append('file_proposal',document.getElementById('file_proposal').files[0]);
+
+const basePath=window.location.pathname.endsWith('/')
+?window.location.pathname
+:window.location.pathname+'/';
+
+const response=await fetch(basePath+'cek-ai',{method:'POST',body:formData});
+const result=await response.json();
+
+document.getElementById("loadingOverlay").style.display="none";
+
+if(result.status!=="sukses"){
+document.getElementById("hasil").innerHTML="Error: "+result.pesan;
+document.getElementById("hasil").style.display="block";
+return;
+}
+
+let ai=result.skor_ai;
+let human=result.human_prob;
+
+let color=ai>=75?"#dc3545":ai>=50?"#ffc107":"#28a745";
+
+let html=`
+<h2>AI Probability Analysis</h2>
+<h3 style="color:${color}">
+${ai}% Probability AI-Generated<br>
+${human}% Likely Human-Written Content
+</h3>
+
+<div class="progress-bar">
+<div class="progress-fill" style="width:${ai}%;background:${color}"></div>
+</div>
+
+<div class="stats-box">
+<b>Distribusi Paragraf:</b><br>
+Total: ${result.stats.total}<br>
+🔴 High (≥75%): ${result.stats.high}<br>
+🟡 Moderate (50–74%): ${result.stats.moderate}<br>
+🟢 Low (<50%): ${result.stats.low}
+</div>
+
+<hr>
+<h3>Highlighted Text Analysis</h3>
+`;
+
+result.paragraphs.forEach((p,i)=>{
+let paraClass="paragraph low-risk";
+let content=p;
+
+if(result.highlight[i]){
+let skor=result.highlight[i].skor;
+
+if(skor>=75){
+paraClass="paragraph high-risk";
+}else if(skor>=50){
+paraClass="paragraph moderate-risk";
+}
+
+let sentences=p.split(/(?<=[.!?])\s+/);
+let highlighted="";
+
+sentences.forEach((s,idx)=>{
+if(result.highlight[i].kalimat_index.includes(idx)){
+if(skor>=75){
+highlighted+=`<span class="sentence-highlight-high" title="${result.highlight[i].alasan}">${s}</span> `;
+}else{
+highlighted+=`<span class="sentence-highlight-moderate" title="${result.highlight[i].alasan}">${s}</span> `;
+}
+}else{
+highlighted+=s+" ";
+}
+});
+
+content=highlighted;
+}
+
+html+=`<div class="${paraClass}">${content}</div>`;
+});
+
+html+=`
+<div class="guide">
+<b>Interpretation Guide:</b><br>
+&lt; 40% → Kemungkinan besar Human-written<br>
+40–70% → Kemungkinan Campuran<br>
+&gt; 70% → Perlu Klarifikasi Akademik
+</div>
+
+<br>
+<a href="${result.pdf}" target="_blank">📄 Download Executive Summary PDF</a>
+`;
+
+document.getElementById("hasil").innerHTML=html;
+document.getElementById("hasil").style.display="block";
+
+});
+</script>
+
+</body>
+</html>
